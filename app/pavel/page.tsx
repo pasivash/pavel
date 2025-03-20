@@ -47,8 +47,44 @@ export default function Page() {
       let parsedLinks: Link[]
 
       try {
-        parsedRecords = JSON.parse(runResultsText)
-        parsedLinks = JSON.parse(linksText)
+        // Check if the files are dbt artifacts by looking at the structure
+        const runResultsJson = JSON.parse(runResultsText)
+        const linksJson = JSON.parse(linksText)
+
+        if (runResultsJson.results && linksJson.with_test_edges) {
+          // Process dbt artifacts
+          parsedRecords = runResultsJson.results
+            .filter((x: any) => 
+              x.thread_id !== 'main' &&
+              x.timing.some((y: any) => y.name === 'compile') &&
+              x.timing.some((y: any) => y.name === 'execute')
+            )
+            .map((x: any) => ({
+              worker: x.thread_id,
+              started_at: x.timing.find((y: any) => y.name === 'compile').started_at,
+              completed_at: x.timing.find((y: any) => y.name === 'execute').completed_at,
+              model: x.unique_id
+            }))
+
+          // Process graph summary
+          const nodes = linksJson.with_test_edges
+          parsedLinks = []
+          for (const [nodeId, nodeData] of Object.entries(nodes)) {
+            const source = (nodeData as any).name
+            if ((nodeData as any).succ) {
+              for (const targetId of (nodeData as any).succ) {
+                if (String(targetId) in nodes) {
+                  const target = nodes[String(targetId)].name
+                  parsedLinks.push({ source, target })
+                }
+              }
+            }
+          }
+        } else {
+          // Process custom files
+          parsedRecords = runResultsJson
+          parsedLinks = linksJson
+        }
       } catch (parseError) {
         console.error("JSON Parse Error:", parseError)
         throw new Error("Failed to parse JSON. Please ensure your files contain valid JSON data.")
@@ -85,7 +121,7 @@ export default function Page() {
       toast({
         title: "Files uploaded successfully",
         description: `Loaded ${parsedRecords.length} run results and ${parsedLinks.length} links`,
-        variant: "success",
+        variant: "default",
       })
 
       // Navigate to the results page
@@ -115,7 +151,7 @@ export default function Page() {
         toast({
           title: "Sample data loaded",
           description: `Generated ${sampleRecords.length} records with ${config.numWorkers} workers`,
-          variant: "success",
+          variant: "default",
         })
         // Navigate to the results page
         router.push("/pavel/res")
