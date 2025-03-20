@@ -3,12 +3,16 @@ import type React from "react"
 interface CriticalPathConnectionsProps {
   criticalPath: string[]
   getModelPositions: (modelName: string) => { center: { x: number; y: number } } | null
+  isTransitionComplete: boolean
 }
 
 export const CriticalPathConnections: React.FC<CriticalPathConnectionsProps> = ({
   criticalPath,
   getModelPositions,
+  isTransitionComplete,
 }) => {
+  if (!isTransitionComplete) return null
+
   return (
     <g className="critical-path-connections">
       {criticalPath.slice(0, -1).map((model, index) => {
@@ -25,7 +29,7 @@ export const CriticalPathConnections: React.FC<CriticalPathConnectionsProps> = (
               y2={nextModel.center.y}
               stroke="hsl(210, 100%, 50%)" // Bright blue color
               strokeWidth={2}
-              strokeDasharray="5,5"
+              strokeDasharray="2 4"
             />
           )
         }
