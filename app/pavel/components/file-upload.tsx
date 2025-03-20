@@ -384,8 +384,8 @@ export function FileUpload({ onFilesUploaded, onUseSampleData, isLoading }: File
             </ul>
             <p>File Upload Options:</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li><strong>DBT Mode:</strong> Upload your DBT run_results.json and graph_summary.json files</li>
-              <li><strong>Custom Mode:</strong> Upload custom JSON files with execution times and model dependencies</li>
+              <li><strong>DBT Artifacts:</strong> Upload your DBT run_results.json and graph_summary.json files</li>
+              <li><strong>Custom Files:</strong> Upload custom JSON files with execution times and model dependencies</li>
             </ul>
             <p>Upload your run results and model links files or use sample data to explore the pipeline's execution.</p>
             <p>
