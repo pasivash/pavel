@@ -4,7 +4,7 @@ import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import type { Record, Link } from "../types"
+import type { Record, Link, ProcessedRecord } from "../../types"
 import { CriticalPathConnections } from "./CriticalPathConnections"
 import { Network } from "lucide-react"
 
@@ -144,7 +144,7 @@ export function Timeline({
   const getModelPositions = useCallback(
     (modelName: string) => {
       for (const [worker, records] of workerData.entries()) {
-        const record = records.find((r) => r.model === modelName)
+        const record = records.find((r: ProcessedRecord) => r.model === modelName)
         if (record) {
           const startX = timeToX(record.start)
           const endX = timeToX(record.end)
@@ -357,7 +357,7 @@ export function Timeline({
                 >
                   Active Workers
                 </text>
-                {[1, Math.floor(maxActiveWorkers / 2), maxActiveWorkers].map((tick) => (
+                {[...new Set([1, Math.floor(maxActiveWorkers / 2), maxActiveWorkers])].map((tick) => (
                   <text
                     key={`worker-activity-tick-${tick}`}
                     x={dimensions.leftPadding - 5}
@@ -539,7 +539,6 @@ export function Timeline({
               <CriticalPathConnections
                 criticalPath={criticalPath}
                 getModelPositions={getModelPositions}
-                showCriticalPathOnChart={showCriticalPathOnChart}
               />
             </svg>
           )}
