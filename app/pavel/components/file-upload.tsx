@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Card, CardContent } from "@/components/ui/card"
 import { CreatorInfo } from "./creator-info"
 import { toast } from "@/components/ui/use-toast"
+import Image from "next/image"
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024 // 30 MB
 const ALLOWED_FILE_TYPES = [".json"]
@@ -115,7 +116,10 @@ export function FileUpload({ onFilesUploaded, onUseSampleData, isLoading }: File
               onChange={(e) => setUploadMode(e.target.value as UploadMode)}
               className="h-4 w-4"
             />
-            <Label htmlFor="dbt-mode">DBT Artifacts</Label>
+            <Label htmlFor="dbt-mode" className="flex items-center gap-1">
+              <Image src="/dbt-logo.png" alt="DBT Logo" width={40} height={40} className="-mt-[1px]" />
+              <span>Artifacts</span>
+            </Label>
           </div>
           <div className="flex items-center space-x-2">
             <input
