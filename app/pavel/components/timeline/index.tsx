@@ -39,6 +39,7 @@ export function Timeline({
   } | null>(null)
   const [selectedTimeRange, setSelectedTimeRange] = useState<{ start: number; end: number } | null>(null)
   const [hoverIndicator, setHoverIndicator] = useState<{ x: number; y: number } | null>(null)
+  const [isTransitionComplete, setIsTransitionComplete] = useState(true)
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isMounted, setIsMounted] = useState(false)
@@ -109,6 +110,7 @@ export function Timeline({
       })
     }
 
+    // Sort workers first
     const workers = uniqueWorkers.sort((a, b) => {
       if (showCriticalPathOnChart && criticalPath.length > 0) {
         const aIndex = workerCriticalPathIndex.get(a) ?? Number.MAX_SAFE_INTEGER
@@ -204,7 +206,6 @@ export function Timeline({
 
   const getBarColor = useCallback(
     (duration: number, model: string, isParent: boolean, isChild: boolean) => {
-      if (showCriticalPathOnChart && criticalPath.includes(model)) return "rgb(3, 105, 161)"
       if (model === selectedModel) return "rgb(0, 0, 0)"
       if (isParent) return "rgb(234, 179, 8)"
       if (isChild) return "rgb(147, 51, 234)"
@@ -233,7 +234,7 @@ export function Timeline({
 
       return `hsl(${hue}, ${saturation}%, ${lightness}%)`
     },
-    [selectedModel, criticalPath, showCriticalPathOnChart],
+    [selectedModel],
   )
 
   const formatTime = useCallback((time: number) => {
@@ -371,6 +372,19 @@ export function Timeline({
     [workerToY],
   )
 
+  // Add effect to handle transition completion
+  useEffect(() => {
+    if (showCriticalPathOnChart) {
+      setIsTransitionComplete(false)
+      const timer = setTimeout(() => {
+        setIsTransitionComplete(true)
+      }, 500) // Match the transition duration
+      return () => clearTimeout(timer)
+    } else {
+      setIsTransitionComplete(true)
+    }
+  }, [showCriticalPathOnChart, workers])
+
   return (
     <Card className="p-4 w-full overflow-x-auto" ref={containerRef}>
       <div style={{ width: "100%", minWidth: `${dimensions.minWidth + 200}px`}}>
@@ -500,7 +514,7 @@ export function Timeline({
                   x2={dimensions.width + dimensions.leftPadding}
                   y2={dimensions.topPadding + i * dimensions.rowHeight}
                   stroke="rgb(229, 231, 235)"
-                  strokeDasharray="4 4"
+                  strokeDasharray="2 4"
                   style={{
                     transition: 'all 0.5s ease-in-out',
                   }}
@@ -555,6 +569,8 @@ export function Timeline({
                           width={Math.max(width, 2)}
                           height={dimensions.barHeight}
                           fill={getBarColor(record.duration, record.model, isParent, isChild)}
+                          stroke={showCriticalPathOnChart && criticalPath.includes(record.model) && isTransitionComplete ? "rgb(3, 105, 161)" : "none"}
+                          strokeWidth={showCriticalPathOnChart && criticalPath.includes(record.model) && isTransitionComplete ? 2 : 0}
                           opacity={selectedModel ? (record.model === selectedModel || isParent || isChild ? 1 : 0.3) : 1}
                           rx={4}
                           className="cursor-pointer transition-opacity duration-200"
@@ -595,6 +611,7 @@ export function Timeline({
               <CriticalPathConnections
                 criticalPath={criticalPath}
                 getModelPositions={getModelPositions}
+                isTransitionComplete={isTransitionComplete}
               />
             </svg>
           )}
