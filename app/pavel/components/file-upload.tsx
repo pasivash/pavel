@@ -377,9 +377,15 @@ export function FileUpload({ onFilesUploaded, onUseSampleData, isLoading }: File
               <li>Interactive timeline of model executions</li>
               <li>Click on a model to see its parents and children (both on the chart and in the right pane)</li>
               <li>View the critical path as a list and highlighted on the chart</li>
+              <li>Workers are automatically sorted by their critical path position when critical path is shown</li>
               <li>Search for specific models</li>
               <li>Chart of active workers over time</li>
               <li>Detailed model information and dependencies</li>
+            </ul>
+            <p>File Upload Options:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li><strong>DBT Mode:</strong> Upload your DBT run_results.json and graph_summary.json files</li>
+              <li><strong>Custom Mode:</strong> Upload custom JSON files with execution times and model dependencies</li>
             </ul>
             <p>Upload your run results and model links files or use sample data to explore the pipeline's execution.</p>
             <p>

@@ -7,6 +7,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { Record, Link, ProcessedRecord } from "../../types"
 import { CriticalPathConnections } from "./CriticalPathConnections"
 import { Network } from "lucide-react"
+import React from "react"
+import type { CSSProperties } from "react"
 
 interface TimelineProps {
   records: Record[]
@@ -85,10 +87,48 @@ export function Timeline({
       duration: (new Date(record.completed_at).getTime() - new Date(record.started_at).getTime()) / 1000,
     }))
 
-    const workers = [...new Set(processed.map((r) => r.worker))].sort((a, b) => {
-      const aNum = Number.parseInt(a.match(/\d+/)?.[0] || "0")
-      const bNum = Number.parseInt(b.match(/\d+/)?.[0] || "0")
-      return aNum - bNum
+    const uniqueWorkers = [...new Set(records.map((r) => r.worker))]
+
+    // Create a map of workers to their earliest critical path model index
+    const workerCriticalPathIndex = new Map<string, number>()
+    
+    if (showCriticalPathOnChart && criticalPath.length > 0) {
+      uniqueWorkers.forEach(worker => {
+        const workerRecords = records.filter(r => r.worker === worker)
+        const criticalPathIndices = workerRecords
+          .filter(r => criticalPath.includes(r.model))
+          .map(r => criticalPath.indexOf(r.model))
+        
+        if (criticalPathIndices.length > 0) {
+          // Use the earliest critical path model index for this worker
+          workerCriticalPathIndex.set(worker, Math.min(...criticalPathIndices))
+        } else {
+          // For workers without critical path models, set a high index
+          workerCriticalPathIndex.set(worker, Number.MAX_SAFE_INTEGER)
+        }
+      })
+    }
+
+    const workers = uniqueWorkers.sort((a, b) => {
+      if (showCriticalPathOnChart && criticalPath.length > 0) {
+        const aIndex = workerCriticalPathIndex.get(a) ?? Number.MAX_SAFE_INTEGER
+        const bIndex = workerCriticalPathIndex.get(b) ?? Number.MAX_SAFE_INTEGER
+        
+        if (aIndex === bIndex) {
+          // If both workers have the same critical path index (or none),
+          // maintain stable order based on worker number
+          const aNum = Number.parseInt(a.match(/\d+/)?.[0] || "0")
+          const bNum = Number.parseInt(b.match(/\d+/)?.[0] || "0")
+          return aNum - bNum
+        }
+        
+        return aIndex - bIndex
+      } else {
+        // Default sorting by worker number when critical path is not shown
+        const aNum = Number.parseInt(a.match(/\d+/)?.[0] || "0")
+        const bNum = Number.parseInt(b.match(/\d+/)?.[0] || "0")
+        return aNum - bNum
+      }
     })
 
     setDimensions((prev) => ({
@@ -123,7 +163,7 @@ export function Timeline({
     }))
 
     return { workers, timeRange, workerData, workerActivityData }
-  }, [records])
+  }, [records, criticalPath, showCriticalPathOnChart])
 
   const timeToX = useCallback(
     (time: number) => {
@@ -316,6 +356,21 @@ export function Timeline({
     [onModelSelect, workerData],
   )
 
+  // Add a function to generate worker row styles
+  const getWorkerRowStyle = useCallback(
+    (worker: string): CSSProperties => {
+      const y = workerToY(worker)
+      return {
+        transform: `translateY(${y}px)`,
+        transition: 'all 0.5s ease-in-out, opacity 0.2s ease-in-out',
+        position: 'absolute',
+        width: '100%',
+        opacity: 1,
+      }
+    },
+    [workerToY],
+  )
+
   return (
     <Card className="p-4 w-full overflow-x-auto" ref={containerRef}>
       <div style={{ width: "100%", minWidth: `${dimensions.minWidth + 200}px`}}>
@@ -446,6 +501,9 @@ export function Timeline({
                   y2={dimensions.topPadding + i * dimensions.rowHeight}
                   stroke="rgb(229, 231, 235)"
                   strokeDasharray="4 4"
+                  style={{
+                    transition: 'all 0.5s ease-in-out',
+                  }}
                 />
               ))}
 
@@ -472,17 +530,52 @@ export function Timeline({
                 ))}
               </g>
 
-              {workers.map((worker, i) => (
-                <text
-                  key={`label-${worker}`}
-                  x={dimensions.leftPadding - 10}
-                  y={dimensions.topPadding + i * dimensions.rowHeight + dimensions.rowHeight / 2}
-                  textAnchor="end"
-                  dominantBaseline="middle"
-                  className="fill-foreground"
-                >
-                  {worker}
-                </text>
+              {workers.map((worker) => (
+                <g key={`worker-group-${worker}`} style={getWorkerRowStyle(worker)}>
+                  <text
+                    x={dimensions.leftPadding - 10}
+                    y={dimensions.rowHeight / 2}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    className="fill-foreground"
+                  >
+                    {worker}
+                  </text>
+                  {workerData.get(worker)?.map((record: any, i: number) => {
+                    const x = timeToX(record.start)
+                    const width = timeToX(record.end) - x
+                    const isParent = parentModels.includes(record.model)
+                    const isChild = childModels.includes(record.model)
+
+                    return (
+                      <g key={`bar-${worker}-${i}`}>
+                        <rect
+                          x={x}
+                          y={0}
+                          width={Math.max(width, 2)}
+                          height={dimensions.barHeight}
+                          fill={getBarColor(record.duration, record.model, isParent, isChild)}
+                          opacity={selectedModel ? (record.model === selectedModel || isParent || isChild ? 1 : 0.3) : 1}
+                          rx={4}
+                          className="cursor-pointer transition-opacity duration-200"
+                          onClick={() => handleModelSelect(record.model === selectedModel ? null : record.model)}
+                          onMouseEnter={(e) => {
+                            setHoveredModel(record.model)
+                            setTooltip({
+                              x: e.clientX,
+                              y: e.clientY,
+                              record,
+                            })
+                          }}
+                          onMouseLeave={() => {
+                            setHoveredModel(null)
+                            setTooltip(null)
+                          }}
+                        />
+                      </g>
+                    )
+                  })}
+                </g>
               ))}
 
               <g className="connections">
@@ -499,43 +592,6 @@ export function Timeline({
                 ))}
               </g>
 
-              {Array.from(workerData.entries()).map(([worker, records]: [string, any[]]) =>
-                records.map((record, i) => {
-                  const x = timeToX(record.start)
-                  const width = timeToX(record.end) - x
-                  const y = workerToY(worker)
-                  const isParent = parentModels.includes(record.model)
-                  const isChild = childModels.includes(record.model)
-
-                  return (
-                    <g key={`bar-${worker}-${i}`}>
-                      <rect
-                        x={x}
-                        y={y}
-                        width={Math.max(width, 2)}
-                        height={dimensions.barHeight}
-                        fill={getBarColor(record.duration, record.model, isParent, isChild)}
-                        opacity={selectedModel ? (record.model === selectedModel || isParent || isChild ? 1 : 0.3) : 1}
-                        rx={4}
-                        className="cursor-pointer transition-opacity duration-200"
-                        onClick={() => handleModelSelect(record.model === selectedModel ? null : record.model)}
-                        onMouseEnter={(e) => {
-                          setHoveredModel(record.model)
-                          setTooltip({
-                            x: e.clientX,
-                            y: e.clientY,
-                            record,
-                          })
-                        }}
-                        onMouseLeave={() => {
-                          setHoveredModel(null)
-                          setTooltip(null)
-                        }}
-                      />
-                    </g>
-                  )
-                }),
-              )}
               <CriticalPathConnections
                 criticalPath={criticalPath}
                 getModelPositions={getModelPositions}
