@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Timeline } from "../components/timeline"
 import { ModelDetails } from "../components/model-details"
 import { ModelSearch } from "../components/model-search"
@@ -71,7 +71,15 @@ const calculateCriticalPathAsync = async (
   }
 }
 
-export default function ResPage() {
+function ResPageSuspenseFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <p className="text-sm text-muted-foreground">Loading dataset...</p>
+    </div>
+  )
+}
+
+function ResPageContent() {
   const { records, links, setData } = useDataStore()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -355,6 +363,14 @@ export default function ResPage() {
         />
       )}
     </div>
+  )
+}
+
+export default function ResPage() {
+  return (
+    <Suspense fallback={<ResPageSuspenseFallback />}>
+      <ResPageContent />
+    </Suspense>
   )
 }
 
