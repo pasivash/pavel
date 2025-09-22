@@ -6,8 +6,9 @@ import { FileUpload } from "./components/file-upload"
 import { SampleDataConfig } from "./components/sample-data-config"
 import { LoadingOverlay } from "./components/loading-overlay"
 import { toast } from "@/components/ui/use-toast"
-import type { Record, Link } from "./types"
 import { useDataStore } from "./store"
+import type { Record, Link } from "./types"
+import { parseUploadedData } from "./utils/data-parsing"
 
 export default function Page() {
   const [isLoading, setIsLoading] = useState(false)
@@ -47,71 +48,18 @@ export default function Page() {
       let parsedLinks: Link[]
 
       try {
-        // Check if the files are dbt artifacts by looking at the structure
         const runResultsJson = JSON.parse(runResultsText)
         const linksJson = JSON.parse(linksText)
-
-        if (runResultsJson.results && linksJson.with_test_edges) {
-          // Process dbt artifacts
-          parsedRecords = runResultsJson.results
-            .filter((x: any) => 
-              x.thread_id !== 'main' &&
-              x.timing.some((y: any) => y.name === 'compile') &&
-              x.timing.some((y: any) => y.name === 'execute')
-            )
-            .map((x: any) => ({
-              worker: x.thread_id,
-              started_at: x.timing.find((y: any) => y.name === 'compile').started_at,
-              completed_at: x.timing.find((y: any) => y.name === 'execute').completed_at,
-              model: x.unique_id
-            }))
-
-          // Process graph summary
-          const nodes = linksJson.with_test_edges
-          parsedLinks = []
-          for (const [nodeId, nodeData] of Object.entries(nodes)) {
-            const source = (nodeData as any).name
-            if ((nodeData as any).succ) {
-              for (const targetId of (nodeData as any).succ) {
-                if (String(targetId) in nodes) {
-                  const target = nodes[String(targetId)].name
-                  parsedLinks.push({ source, target })
-                }
-              }
-            }
-          }
-        } else {
-          // Process custom files
-          parsedRecords = runResultsJson
-          parsedLinks = linksJson
-        }
+        const dataset = parseUploadedData(runResultsJson, linksJson)
+        parsedRecords = dataset.records
+        parsedLinks = dataset.links
       } catch (parseError) {
         console.error("JSON Parse Error:", parseError)
-        throw new Error("Failed to parse JSON. Please ensure your files contain valid JSON data.")
-      }
-
-      // Validate records
-      if (
-        !Array.isArray(parsedRecords) ||
-        parsedRecords.some(
-          (record) =>
-            typeof record.worker !== "string" ||
-            typeof record.started_at !== "string" ||
-            typeof record.completed_at !== "string" ||
-            typeof record.model !== "string",
+        throw new Error(
+          parseError instanceof Error
+            ? parseError.message
+            : "Failed to parse JSON. Please ensure your files contain valid JSON data.",
         )
-      ) {
-        console.error("Invalid run results format")
-        throw new Error("Invalid run results format. Please check your run results file.")
-      }
-
-      // Validate links
-      if (
-        !Array.isArray(parsedLinks) ||
-        parsedLinks.some((link) => typeof link.source !== "string" || typeof link.target !== "string")
-      ) {
-        console.error("Invalid links format")
-        throw new Error("Invalid links format. Please check your links file.")
       }
 
       console.log(`Parsed ${parsedRecords.length} records and ${parsedLinks.length} links`)
