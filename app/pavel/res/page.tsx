@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Timeline } from "../components/timeline"
 import { ModelDetails } from "../components/model-details"
 import { ModelSearch } from "../components/model-search"
@@ -15,7 +15,7 @@ import { CriticalPathSummary } from "../components/critical-path-summary"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CreatorInfo } from "../components/creator-info"
 import { useDataStore } from "../store"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 
 const calculateCriticalPathAsync = async (
   currentRecords: Record[],
@@ -72,8 +72,11 @@ const calculateCriticalPathAsync = async (
 }
 
 export default function ResPage() {
-  const { records, links } = useDataStore()
+  const { records, links, setData } = useDataStore()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const datasetId = searchParams.get("dataset")
+  const datasetToken = searchParams.get("token")
 
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -83,6 +86,8 @@ export default function ResPage() {
   const [isCriticalPathCalculating, setIsCriticalPathCalculating] = useState(false)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const [criticalPath, setCriticalPath] = useState<string[]>([])
+  const [isDatasetLoading, setIsDatasetLoading] = useState(false)
+  const hasAttemptedDatasetLoadRef = useRef(false)
   const [dimensions, setDimensions] = useState({
     width: 900,
     minWidth: 900,
@@ -114,10 +119,61 @@ export default function ResPage() {
   }, [])
 
   useEffect(() => {
-    if (records.length === 0 && links.length === 0) {
+    if (
+      !datasetId ||
+      !datasetToken ||
+      hasAttemptedDatasetLoadRef.current ||
+      (records.length > 0 && links.length > 0)
+    ) {
+      return
+    }
+
+    const loadDataset = async () => {
+      try {
+        setIsDatasetLoading(true)
+        setIsLoading(true)
+        setLoadingMessage("Loading dataset...")
+
+        const response = await fetch(
+          `/api/datasets/${datasetId}?token=${encodeURIComponent(datasetToken)}`,
+        )
+        if (!response.ok) {
+          throw new Error(`Failed to load dataset (status ${response.status}).`)
+        }
+
+        const data: { records: Record[]; links: Link[] } = await response.json()
+        setData(data.records, data.links)
+      } catch (error) {
+        console.error("Failed to load dataset:", error)
+        toast({
+          title: "Unable to load dataset",
+          description:
+            error instanceof Error
+              ? error.message
+              : "An unexpected error occurred while loading the dataset.",
+          variant: "destructive",
+        })
+        router.push("/pavel")
+      } finally {
+        hasAttemptedDatasetLoadRef.current = true
+        setIsDatasetLoading(false)
+        setIsLoading(false)
+      }
+    }
+
+    void loadDataset()
+  }, [datasetId, datasetToken, links.length, records.length, router, setData])
+
+  useEffect(() => {
+    if (
+      records.length === 0 &&
+      links.length === 0 &&
+      (!datasetId || !datasetToken) &&
+      !isDatasetLoading
+    ) {
       router.push("/pavel")
     }
-  }, [records, links, router])
+  }, [datasetId, datasetToken, isDatasetLoading, links.length, records.length, router])
 
   const { workers, timeRange, workerData, workerActivityData } = useMemo(() => {
     if (records.length === 0) {
