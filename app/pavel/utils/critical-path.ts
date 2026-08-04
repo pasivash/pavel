@@ -143,3 +143,74 @@ export async function calculateCriticalPath(
   }
 }
 
+// Calculate longest path from start to a specific target model
+export function calculateCriticalPathToModel(
+  records: Record[],
+  links: Link[],
+  targetModel: string,
+): string[] {
+  const modelDurations = new Map(
+    records.map((record) => [
+      record.model,
+      (new Date(record.completed_at).getTime() - new Date(record.started_at).getTime()) / 1000,
+    ]),
+  )
+
+  // Build graph
+  const graph: Record<string, { duration: number; parents: string[] }> = {}
+  records.forEach((record) => {
+    graph[record.model] = {
+      duration: modelDurations.get(record.model) || 0,
+      parents: [],
+    }
+  })
+
+  links.forEach((link) => {
+    if (graph[link.source] && graph[link.target]) {
+      graph[link.target].parents.push(link.source)
+    }
+  })
+
+  // Calculate longest path to each node using DP
+  const longestPath = new Map<string, { length: number; path: string[] }>()
+  const visited = new Set<string>()
+
+  function dfs(node: string): { length: number; path: string[] } {
+    if (longestPath.has(node)) {
+      return longestPath.get(node)!
+    }
+
+    if (visited.has(node)) {
+      return { length: 0, path: [node] }
+    }
+
+    visited.add(node)
+
+    const parents = graph[node]?.parents || []
+    if (parents.length === 0) {
+      const result = { length: graph[node].duration, path: [node] }
+      longestPath.set(node, result)
+      return result
+    }
+
+    let maxLength = 0
+    let maxPath: string[] = []
+
+    for (const parent of parents) {
+      const parentResult = dfs(parent)
+      const totalLength = parentResult.length + graph[node].duration
+      if (totalLength > maxLength) {
+        maxLength = totalLength
+        maxPath = [...parentResult.path]
+      }
+    }
+
+    const result = { length: maxLength, path: [...maxPath, node] }
+    longestPath.set(node, result)
+    return result
+  }
+
+  const result = dfs(targetModel)
+  return result.path
+}
+

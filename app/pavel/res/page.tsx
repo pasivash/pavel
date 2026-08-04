@@ -16,6 +16,8 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { CreatorInfo } from "../components/creator-info"
 import { useDataStore } from "../store"
 import { useRouter, useSearchParams } from "next/navigation"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 
 const calculateCriticalPathAsync = async (
   currentRecords: Record[],
@@ -25,7 +27,7 @@ const calculateCriticalPathAsync = async (
     setLoadingMessage: (message: string) => void
     setAbortController: (controller: AbortController | null) => void
     setCriticalPath: (path: string[]) => void
-    toast: (params: { title: string; description: string; variant: string }) => void
+    toast: (params: { title: string; description: string; variant: "default" | "destructive" }) => void
   },
 ) => {
   if (currentRecords.length > 0 && currentLinks.length > 0) {
@@ -96,6 +98,9 @@ function ResPageContent() {
   const [criticalPath, setCriticalPath] = useState<string[]>([])
   const [isDatasetLoading, setIsDatasetLoading] = useState(false)
   const hasAttemptedDatasetLoadRef = useRef(false)
+  const [modelView, setModelView] = useState<'lineage' | 'critical-path'>('lineage')
+  const [modelCriticalPath, setModelCriticalPath] = useState<string[]>([])
+  const [showTests, setShowTests] = useState(true)
   const [dimensions, setDimensions] = useState({
     width: 900,
     minWidth: 900,
@@ -183,8 +188,29 @@ function ResPageContent() {
     }
   }, [datasetId, datasetToken, isDatasetLoading, links.length, records.length, router])
 
+  const filteredRecords = useMemo(() => {
+    if (showTests) return records
+    return records.filter(record => !record.model.startsWith('test.'))
+  }, [records, showTests])
+
+  const filteredLinks = useMemo(() => {
+    if (showTests) return links
+    const filteredModelSet = new Set(filteredRecords.map(r => r.model))
+    return links.filter(link => filteredModelSet.has(link.source) && filteredModelSet.has(link.target))
+  }, [links, filteredRecords, showTests])
+
+  // Clear selection if selected model gets filtered out
+  useEffect(() => {
+    if (selectedModel && !filteredRecords.find(r => r.model === selectedModel)) {
+      setSelectedModel(null)
+      setSelectedTimeRange(null)
+      setModelView('lineage')
+      setModelCriticalPath([])
+    }
+  }, [filteredRecords, selectedModel])
+
   const { workers, timeRange, workerData, workerActivityData } = useMemo(() => {
-    if (records.length === 0) {
+    if (filteredRecords.length === 0) {
       return {
         workers: [],
         timeRange: { start: 0, end: 0 },
@@ -193,7 +219,7 @@ function ResPageContent() {
       }
     }
 
-    const processed = records.map((record) => ({
+    const processed = filteredRecords.map((record) => ({
       model: record.model,
       worker: record.worker,
       started_at: record.started_at,
@@ -203,7 +229,7 @@ function ResPageContent() {
       duration: (new Date(record.completed_at).getTime() - new Date(record.started_at).getTime()) / 1000,
     }))
 
-    const workers = [...new Set(records.map((r) => r.worker))].sort((a, b) => {
+    const workers = [...new Set(filteredRecords.map((r) => r.worker))].sort((a, b) => {
       const aNum = Number.parseInt(a.match(/\d+/)?.[0] || "0")
       const bNum = Number.parseInt(b.match(/\d+/)?.[0] || "0")
       return aNum - bNum
@@ -241,18 +267,18 @@ function ResPageContent() {
     })
 
     return { workers, timeRange, workerData, workerActivityData }
-  }, [records])
+  }, [filteredRecords])
 
   const executionSummary = useMemo(() => {
     const totalDuration = timeRange.end - timeRange.start
-    const totalModels = records.length
+    const totalModels = filteredRecords.length
     const totalWorkers = workers.length
     return { totalDuration, totalModels, totalWorkers }
-  }, [timeRange, records, workers])
+  }, [timeRange, filteredRecords, workers])
 
   useEffect(() => {
-    if (records.length > 0 && links.length > 0) {
-      calculateCriticalPathAsync(records, links, {
+    if (filteredRecords.length > 0 && filteredLinks.length > 0) {
+      calculateCriticalPathAsync(filteredRecords, filteredLinks, {
         setIsCriticalPathCalculating,
         setLoadingMessage,
         setAbortController,
@@ -260,7 +286,7 @@ function ResPageContent() {
         toast,
       })
     }
-  }, [records, links])
+  }, [filteredRecords, filteredLinks])
 
   const handleCancelCalculation = useCallback(() => {
     if (abortController) {
@@ -279,7 +305,7 @@ function ResPageContent() {
     (model: string | null) => {
       setSelectedModel(model)
       if (model) {
-        const selectedRecord = records.find((record) => record.model === model)
+        const selectedRecord = filteredRecords.find((record) => record.model === model)
         if (selectedRecord) {
           setSelectedTimeRange({
             start: new Date(selectedRecord.started_at).getTime(),
@@ -295,9 +321,19 @@ function ResPageContent() {
         }
       } else {
         setSelectedTimeRange(null)
+        setModelView('lineage')
+        setModelCriticalPath([])
       }
     },
-    [records],
+    [filteredRecords],
+  )
+
+  const handleModelViewChange = useCallback(
+    (view: 'lineage' | 'critical-path', criticalPath: string[]) => {
+      setModelView(view)
+      setModelCriticalPath(criticalPath)
+    },
+    [],
   )
 
   return (
@@ -321,28 +357,47 @@ function ResPageContent() {
                       totalWorkers={executionSummary.totalWorkers}
                     />
                   </div>
+                  <div className="flex-shrink-0 flex items-center space-x-2 h-9 px-3 bg-white rounded-md border">
+                    <Checkbox 
+                      id="show-tests" 
+                      checked={showTests} 
+                      onCheckedChange={(checked) => setShowTests(checked === true)}
+                    />
+                    <Label 
+                      htmlFor="show-tests" 
+                      className="text-sm font-medium cursor-pointer select-none"
+                    >
+                      Show tests
+                    </Label>
+                  </div>
                   <div className="flex-grow min-w-0">
-                    <ModelSearch records={records} onModelSelect={handleModelSelect} selectedModel={selectedModel} />
+                    <ModelSearch records={filteredRecords} onModelSelect={handleModelSelect} selectedModel={selectedModel} />
                   </div>
                 </div>
               </div>
 
               {criticalPath.length > 0 && (
-                <CriticalPathSummary criticalPath={criticalPath} records={records} onModelSelect={handleModelSelect} />
+                <CriticalPathSummary criticalPath={criticalPath} records={filteredRecords} onModelSelect={handleModelSelect} />
               )}
 
               <div className="flex flex-col gap-4">
                 <div className="w-full overflow-x-auto">
                   <Timeline
-                    records={records}
-                    links={links}
+                    records={filteredRecords}
+                    links={filteredLinks}
                     selectedModel={selectedModel}
                     onModelSelect={handleModelSelect}
-                    selectedTimeRange={selectedTimeRange}
-                    criticalPath={showCriticalPathOnChart ? criticalPath : []}
-                    showCriticalPathOnChart={showCriticalPathOnChart}
+                    criticalPath={
+                      modelView === 'critical-path' && modelCriticalPath.length > 0
+                        ? modelCriticalPath
+                        : showCriticalPathOnChart
+                        ? criticalPath
+                        : []
+                    }
+                    showCriticalPathOnChart={
+                      showCriticalPathOnChart || (modelView === 'critical-path' && modelCriticalPath.length > 0)
+                    }
                     onToggleCriticalPath={toggleCriticalPathOnChart}
-                    dimensions={dimensions}
                   />
                 </div>
               </div>
@@ -354,7 +409,13 @@ function ResPageContent() {
         </TooltipProvider>
       </div>
       <div id="model-details" className="w-full lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
-        <ModelDetails model={selectedModel} records={records} links={links} onModelSelect={handleModelSelect} />
+        <ModelDetails 
+          model={selectedModel} 
+          records={filteredRecords} 
+          links={filteredLinks} 
+          onModelSelect={handleModelSelect}
+          onViewChange={handleModelViewChange}
+        />
       </div>
       {(isLoading || isCriticalPathCalculating) && (
         <LoadingOverlay
@@ -373,4 +434,3 @@ export default function ResPage() {
     </Suspense>
   )
 }
-
