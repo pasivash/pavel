@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { Record, Link, ProcessedRecord } from "../../types"
 import { CriticalPathConnections } from "./CriticalPathConnections"
-import { Network } from "lucide-react"
+import { Network, ZoomOut } from "lucide-react"
 import React from "react"
 import type { CSSProperties } from "react"
+import { useDataStore } from "../../store"
 
 interface TimelineProps {
   records: Record[]
@@ -43,6 +44,10 @@ export function Timeline({
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isMounted, setIsMounted] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragStart, setDragStart] = useState<number | null>(null)
+  const [dragEnd, setDragEnd] = useState<number | null>(null)
+  const { zoomRange, setZoomRange } = useDataStore()
 
   const [dimensions, setDimensions] = useState({
     width: 900,
@@ -170,6 +175,16 @@ export function Timeline({
   const timeToX = useCallback(
     (time: number) => {
       const timeWidth = dimensions.width
+      const effectiveRange = zoomRange || timeRange
+      return dimensions.leftPadding + ((time - effectiveRange.start) / (effectiveRange.end - effectiveRange.start)) * timeWidth
+    },
+    [dimensions.width, dimensions.leftPadding, timeRange, zoomRange],
+  )
+
+  // For Active Workers chart - always use original timeRange regardless of zoom
+  const timeToXOriginal = useCallback(
+    (time: number) => {
+      const timeWidth = dimensions.width
       return dimensions.leftPadding + ((time - timeRange.start) / (timeRange.end - timeRange.start)) * timeWidth
     },
     [dimensions.width, dimensions.leftPadding, timeRange],
@@ -249,14 +264,15 @@ export function Timeline({
   const timeAxisTicks = useMemo(() => {
     const ticks = []
     const tickCount = 6
-    const timeSpan = timeRange.end - timeRange.start
+    const effectiveRange = zoomRange || timeRange
+    const timeSpan = effectiveRange.end - effectiveRange.start
 
     for (let i = 0; i <= tickCount; i++) {
-      ticks.push(timeRange.start + timeSpan * (i / tickCount))
+      ticks.push(effectiveRange.start + timeSpan * (i / tickCount))
     }
 
     return ticks
-  }, [timeRange])
+  }, [timeRange, zoomRange])
 
   const { relevantLinks, parentModels, childModels } = useMemo(() => {
     if (!selectedModel) return { relevantLinks: [], parentModels: [], childModels: [] }
@@ -322,11 +338,16 @@ export function Timeline({
       const timeWidth = dimensions.width
       const time = timeRange.start + (mouseX / timeWidth) * (timeRange.end - timeRange.start)
 
+      if (isDragging && dragStart !== null) {
+        setDragEnd(time)
+        return
+      }
+
       const closestPoint = workerActivityData.reduce((prev, curr) => {
         return Math.abs(curr.time - time) < Math.abs(prev.time - time) ? curr : prev
       })
 
-      const x = timeToX(closestPoint.time)
+      const x = timeToXOriginal(closestPoint.time)
       const y = workerActivityToY(closestPoint.activeWorkers)
 
       setHoverIndicator({ x, y })
@@ -337,8 +358,58 @@ export function Timeline({
         time: closestPoint.time,
       })
     },
-    [dimensions, timeRange, workerActivityData, timeToX, workerActivityToY],
+    [dimensions, timeRange, workerActivityData, timeToXOriginal, workerActivityToY, isDragging, dragStart],
   )
+
+  const handleActivityMouseDown = useCallback(
+    (event: React.MouseEvent<SVGRectElement>) => {
+      if (!svgRef.current) return
+
+      const svgRect = svgRef.current.getBoundingClientRect()
+      const mouseX = event.clientX - svgRect.left - dimensions.leftPadding
+
+      const timeWidth = dimensions.width
+      const time = timeRange.start + (mouseX / timeWidth) * (timeRange.end - timeRange.start)
+
+      setIsDragging(true)
+      setDragStart(time)
+      setDragEnd(time)
+      setActivityTooltip(null)
+      setHoverIndicator(null)
+    },
+    [dimensions, timeRange],
+  )
+
+  const handleActivityMouseUp = useCallback(() => {
+    if (isDragging && dragStart !== null && dragEnd !== null) {
+      const start = Math.min(dragStart, dragEnd)
+      const end = Math.max(dragStart, dragEnd)
+      
+      // Only set zoom if the selection is significant (more than 1% of total range)
+      const minSelection = (timeRange.end - timeRange.start) * 0.01
+      if (end - start > minSelection) {
+        setZoomRange({ start, end })
+      }
+    }
+    setIsDragging(false)
+    setDragStart(null)
+    setDragEnd(null)
+  }, [isDragging, dragStart, dragEnd, timeRange, setZoomRange])
+
+  const handleResetZoom = useCallback(() => {
+    setZoomRange(null)
+  }, [setZoomRange])
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      if (isDragging) {
+        handleActivityMouseUp()
+      }
+    }
+
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => window.removeEventListener('mouseup', handleMouseUp)
+  }, [isDragging, handleActivityMouseUp])
 
   const handleModelSelect = useCallback(
     (model: string | null) => {
@@ -389,7 +460,26 @@ export function Timeline({
     <Card className="p-4 w-full overflow-x-auto" ref={containerRef}>
       <div style={{ width: "100%", minWidth: `${dimensions.minWidth + 200}px`}}>
         <div className="relative">
-          <div className="absolute top-2 right-2">
+          <div className="absolute top-2 right-2 flex gap-2">
+            {zoomRange && (
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleResetZoom}
+                      className="h-8 w-8 rounded-md"
+                    >
+                      <ZoomOut className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="tooltip-content bg-white">
+                    Reset Zoom
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
             <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -441,7 +531,7 @@ export function Timeline({
                   <path
                     d={workerActivityData
                       .filter((d) => d.time >= selectedTimeRange.start && d.time <= selectedTimeRange.end)
-                      .map((d, i) => `${i === 0 ? "M" : "L"} ${timeToX(d.time)} ${workerActivityToY(d.activeWorkers)}`)
+                      .map((d, i) => `${i === 0 ? "M" : "L"} ${timeToXOriginal(d.time)} ${workerActivityToY(d.activeWorkers)}`)
                       .join(" ")}
                     fill="none"
                     stroke="hsl(var(--primary))"
@@ -451,7 +541,7 @@ export function Timeline({
                 )}
                 <path
                   d={workerActivityData
-                    .map((d, i) => `${i === 0 ? "M" : "L"} ${timeToX(d.time)} ${workerActivityToY(d.activeWorkers)}`)
+                    .map((d, i) => `${i === 0 ? "M" : "L"} ${timeToXOriginal(d.time)} ${workerActivityToY(d.activeWorkers)}`)
                     .join(" ")}
                   fill="none"
                   stroke="hsl(var(--primary))"
@@ -468,6 +558,31 @@ export function Timeline({
                     strokeWidth="2"
                   />
                 )}
+                {isDragging && dragStart !== null && dragEnd !== null && (
+                  <rect
+                    x={timeToXOriginal(Math.min(dragStart, dragEnd))}
+                    y={dimensions.topPadding - dimensions.workerActivityHeight - dimensions.workerActivityTopMargin - 30}
+                    width={Math.abs(timeToXOriginal(dragEnd) - timeToXOriginal(dragStart))}
+                    height={dimensions.workerActivityHeight + dimensions.workerActivityTopMargin + 30}
+                    fill="hsl(var(--primary))"
+                    opacity="0.2"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth="1"
+                  />
+                )}
+                {zoomRange && (
+                  <rect
+                    x={timeToXOriginal(zoomRange.start)}
+                    y={dimensions.topPadding - dimensions.workerActivityHeight - dimensions.workerActivityTopMargin - 30}
+                    width={timeToXOriginal(zoomRange.end) - timeToXOriginal(zoomRange.start)}
+                    height={dimensions.workerActivityHeight + dimensions.workerActivityTopMargin + 30}
+                    fill="none"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth="2"
+                    strokeDasharray="4 2"
+                    opacity="0.6"
+                  />
+                )}
                 <rect
                   x={dimensions.leftPadding}
                   y={dimensions.topPadding - dimensions.workerActivityHeight - dimensions.workerActivityTopMargin - 30}
@@ -475,11 +590,12 @@ export function Timeline({
                   height={dimensions.workerActivityHeight + dimensions.workerActivityTopMargin + 30}
                   fill="transparent"
                   onMouseMove={handleActivityMouseMove}
+                  onMouseDown={handleActivityMouseDown}
                   onMouseLeave={() => {
                     setActivityTooltip(null)
                     setHoverIndicator(null)
                   }}
-                  style={{ cursor: "crosshair" }}
+                  style={{ cursor: isDragging ? "grabbing" : "crosshair" }}
                 />
               </g>
 
@@ -556,8 +672,18 @@ export function Timeline({
                     {worker}
                   </text>
                   {workerData.get(worker)?.map((record: any, i: number) => {
-                    const x = timeToX(record.start)
-                    const width = timeToX(record.end) - x
+                    const effectiveRange = zoomRange || timeRange
+                    // Only render records that are at least partially visible in the current range
+                    if (record.end < effectiveRange.start || record.start > effectiveRange.end) {
+                      return null
+                    }
+
+                    // Clamp the start and end times to the visible range
+                    const visibleStart = Math.max(record.start, effectiveRange.start)
+                    const visibleEnd = Math.min(record.end, effectiveRange.end)
+                    
+                    const x = timeToX(visibleStart)
+                    const width = timeToX(visibleEnd) - x
                     const isParent = parentModels.includes(record.model)
                     const isChild = childModels.includes(record.model)
 
